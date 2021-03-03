@@ -1,0 +1,257 @@
+options{
+	JAVA_UNICODE_ESCAPE = true;
+	IGNORE_CASE = true;
+  MULTI = true;
+  VISITOR = true;
+  NODE_DEFAULT_VOID = true;
+}
+
+PARSER_BEGIN(CCAL)
+
+import java.io.*;
+import java.util.*;
+
+  public class CCAL
+  {
+    public static Hashtable SymbolTable = new Hashtable();
+    public static void main(String args[]) throws ParseException, FileNotFoundException
+    {
+      CCAL parser;
+
+   		if (args.length == 0)
+      {
+         System.out.println("Please pass in the filename");
+         System.exit(1);
+      }
+      else
+      {
+   		 parser = new CCAL(new FileInputStream(args[0]));
+
+       SimpleNode root = parser.Program();
+
+       System.out.println("Abstract Syntax Tree:");
+       root.dump(" ");
+
+       System.out.println("\n\n********Semantic Analysis********\n");
+       SemanticCheckVisitor check = new SemanticCheckVisitor();
+       root.jjtAccept(check, null);
+       }
+    }
+   }
+PARSER_END(CCAL)
+
+
+TOKEN_MGR_DECLS :
+{
+   static int commentNesting = 0;
+}
+
+SKIP :
+{
+  " "
+| "\t"
+| "\n"
+| "\r"
+| "\f"
+}
+
+SKIP : /* COMMENTS */
+{
+	< "//" (~["\n"])* "\n" >
+  | "//" { commentNesting++; } : IN_COMMENT
+}
+
+<IN_COMMENT> SKIP :
+{
+  "/*" { commentNesting++; }
+| "*/" { commentNesting--; if (commentNesting == 0) SwitchTo(DEFAULT); }
+| <~[]>
+}
+
+TOKEN :
+{
+  < COMMA : "," >
+| < SEMI_COLON : ";" >
+| < COLON : ":" >
+| < EQUALS : "=" >
+| < LBR : "(" >
+| < RBR : ")" >
+| < PLUS_SIGN : "+" >
+| < MINUS_SIGN : "-" >
+| < TILDA : "~" >
+| < OR_SIGN : "||" >
+| < AND_SIGN : "&&" >
+| < EQUAL_TO : "==" >
+| < NOT_EQUAL_TO : "!=" >
+| < LESS_THAN : "<" >
+| < LESS_OR_EQUAL : "<=" >
+| < GREATER_THAN : ">" >
+| < GREATER_OR_EQUAL : ">=" >
+}
+
+TOKEN :
+{
+    < VAR : "var" >
+  | < CONST : "const" >
+  | < RETURN : "return" >
+  | < INTEGER : "integer" >
+  | < BOOLEAN : "boolean" >
+  | < VOID : "void" >
+  | < MAIN : "main" >
+  | < IF : "if" >
+  | < ELSE : "else" >
+  | < TRUE : "true" >
+  | < FALSE : "false" >
+  | < WHILE : "while" >
+	| < BEGIN : "begin" >
+	| < END : "end" >
+	| < IS : "is" >
+	| < SKIP_IT : "skip" >
+}
+
+TOKEN :
+{
+ 		< NUMBER: ( "-" ["1"-"9"] (<DIGIT>)* ) |
+			( ["1"-"9"] (<DIGIT>)* ) | "0" >
+	| < #DIGIT : ["0" - "9"] >
+	| < ID : <LETTER> (<LETTER> | <DIGIT> | "_")* >
+	| < #LETTER : ["a" - "z", "A" - "Z"] >
+}
+
+SimpleNode Program () #Program :{}{
+  decl_list() function_list() main() { return jjtThis; }
+}
+
+void decl_list () :{}{
+  decl()<SEMI_COLON>decl_list() | {}
+}
+
+void decl () :{}{
+  var_decl() | const_decl()
+}
+
+void var_decl () #Decl :{}{
+  <VAR> identifier()<COLON>type()
+}
+
+void const_decl () #Const :{}{
+  <CONST> identifier()<COLON>type() <EQUALS> expression()
+}
+
+void function_list () #FuncList :{}{
+  function() function_list() | {}
+}
+
+void function () #Func :{}{
+  type()identifier()<LBR>parameter_list()<RBR> <IS>
+  decl_list()
+	<BEGIN>
+  statement_block()
+  <RETURN><LBR>[expression()]<RBR><SEMI_COLON>
+  <END>
+}
+
+void parameter_list () #Params :{}{
+  nemp_parameter_list() | {}
+}
+
+void nemp_parameter_list () :{}{
+	LOOKAHEAD(2)
+  identifier() <COLON> type() | identifier() <COLON> type() [<COMMA> nemp_parameter_list()]
+}
+
+void main () #Main :{}{
+  <MAIN> <BEGIN>
+  decl_list()
+  statement_block()
+  <END>
+}
+
+void type() #Type : { Token t; }
+{
+      t = <INTEGER> { jjtThis.value = token;}
+    | t = <BOOLEAN> { jjtThis.value = token;}
+    | t = <VOID> { jjtThis.value = token;}
+}
+
+void statement_block () :{}{
+  statement() statement_block() | {}
+}
+
+void statement () #StateBlock :{}{
+	LOOKAHEAD(2)
+  identifier() <EQUALS> expression() <SEMI_COLON>
+	| identifier() <LBR> arg_list() <RBR> <SEMI_COLON>
+  | <BEGIN> statement_block() <END>
+  | <IF> condition() <BEGIN> statement_block() <END> <ELSE> <BEGIN> statement_block() <END>
+	| <WHILE> condition() <BEGIN> statement_block() <END>
+  | <SKIP_IT> <SEMI_COLON>
+}
+
+
+void expression(): {}
+{
+    fragment() bin_expr()
+|   <LBR> expression() <RBR> bin_expr()
+}
+
+void bin_expr() : {}
+{
+    binary_op() expression()
+|   {}
+}
+
+void binary_op () #BinOp : {}{
+  <PLUS_SIGN> #Add
+| <MINUS_SIGN> #Sub
+}
+
+void fragment () :{}{
+  identifier() [<LBR> arg_list() <RBR>] | <MINUS_SIGN> identifier() | number() | boolValue()
+}
+
+void condition () :{}{
+	<TILDA> condition()
+	| LOOKAHEAD(2) <LBR> condition() <RBR>
+	| expression() comp_op() expression()
+	| cond_sign()
+}
+
+void cond_sign() : {}
+{
+    <OR_SIGN> condition() #OR
+  | <AND_SIGN> condition() #AND
+  | {}
+}
+
+void comp_op () #CompOp :{}{
+    <EQUAL_TO> #Equal
+  | <NOT_EQUAL_TO> #NotEqual
+  | <LESS_THAN> #LessThan
+  | <LESS_OR_EQUAL> #LessOrEqual
+  | <GREATER_THAN> #GreaterThan
+  | <GREATER_OR_EQUAL> #GreaterOrEqual
+}
+
+void arg_list () #ArgList :{}{
+  (nemp_arg_list() | {})
+}
+
+void nemp_arg_list () :{}{
+	identifier() [<COMMA> nemp_arg_list()]
+}
+
+void identifier() #Id : { Token t; }
+{
+	t = <ID> { jjtThis.value = token;}
+}
+
+void number() #Num : { Token t; }
+{
+	t = <NUMBER> { jjtThis.value = token;}
+}
+
+void boolValue() #Bool : { Token t; }
+{
+	t = <TRUE> { jjtThis.value = token;} | t = <FALSE> { jjtThis.value = token;}
+}
